@@ -1,0 +1,264 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Alium Bets Test Tool CodePipeline POC 
+
+Parameters:
+
+  SourceRepoUrl:
+    Type: String
+    Default: 'https://github.com/Flutter-Global/ppb-alium-ce-codepipeline-poc'
+    Description: URL of the source code repository
+
+  GitHubAuthToken:
+    Type: String
+    Default: '{{resolve:secretsmanager:alium/CodePipelinePOC/GitHubSecret:SecretString:FlutterGlobalCodePipelinePOCGitHubSecret}}'
+    
+  GitHubOwner:
+    Type: String
+    Default: Flutter-Global
+    AllowedPattern: "[A-Za-z0-9-]+"
+
+  GitHubRepo:
+    Type: String
+    Default: ppb-alium-ce-codepipeline-poc
+    AllowedPattern: "[A-Za-z0-9-]+"
+
+  GitHubBranch:
+    Type: String
+    Default: master
+    AllowedPattern: "[A-Za-z0-9-]+"
+
+  PipelineBucket:
+    Default: rodoherty-codepipeline-artifactstorebucket
+    Description: Name of the S3 bucket that codepipeline will create to store source and build artifacts
+    Type: String
+
+  BuildArtifactsBucket:
+    Default: 'rodoherty-codepipeline-build-artifacts'
+    Description: Name of the S3 bucket in which codepipline will store a zip containing the built artifacts
+    Type: String
+
+  BuildArtifactsS3Key:
+    Default: buildArtifacts.zip
+    Description: Name of the S3 key of the zipped build artifact
+    Type: String
+
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "CodePipeline Settings"
+        Parameters:
+          - PipelineName
+
+Resources:
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Location: !Ref PipelineBucket
+        Type: S3
+ 
+      DisableInboundStageTransitions: []
+      Name: !Sub ${AWS::StackName}-Pipeline
+      RoleArn: !GetAtt [PipelineRole, Arn]
+      Stages:
+        - Name: GitHubSource
+          Actions:
+          - Name: GitHubSourceAction
+            InputArtifacts: []
+            ActionTypeId:
+              Category: Source
+              Owner: ThirdParty
+              Version: 1
+              Provider: GitHub
+            OutputArtifacts:
+            - Name: SourceCode
+            Configuration:
+              Owner: !Ref GitHubOwner
+              Repo: !Ref GitHubRepo
+              Branch: !Ref GitHubBranch
+              PollForSourceChanges: false
+              OAuthToken: !Ref GitHubAuthToken
+        - Name: Compile
+          Actions:
+          - Name: Compile
+            InputArtifacts:
+            - Name: SourceCode
+            ActionTypeId:
+              Category: Build
+              Owner: AWS
+              Provider: CodeBuild
+              Version: '1'
+            Configuration:
+              ProjectName: !Sub ${AWS::StackName}-CodeBuildProject
+              PrimarySource: GitHubSourceAction
+            OutputArtifacts:
+            - Name: BuildArtifacts
+        - Name: DeployToS3Stage
+          Actions:
+          - Name: DeployToS3Action
+            InputArtifacts: 
+            - Name: BuildArtifacts
+            ActionTypeId:
+              Category: Deploy
+              Owner: AWS
+              Provider: S3
+              Version: '1'
+            Configuration:
+              BucketName: !Ref BuildArtifactsBucket
+              ObjectKey: !Ref BuildArtifactsS3Key
+              Extract: false
+        - Name: BuildDockerImageStage
+          Actions:
+          - Name: BuildDockerImageAction
+            InputArtifacts: 
+            - Name: SourceCode
+            ActionTypeId:
+              Category: Build
+              Owner: AWS
+              Provider: CodeBuild
+              Version: '1'
+            Configuration:
+              ProjectName: !Sub ${AWS::StackName}-BuildDockerImageProject
+              PrimarySource: GitHubSourceAction
+              EnvironmentVariables: !Sub '[{"name":"IMAGE_REPO_NAME","value":"alium-ecr-repo","type":"PLAINTEXT"},{"name":"AWS_ACCOUNT_ID","value":"430758838994","type":"PLAINTEXT"}, {"name":"ARTIFACT_BUCKET", "value":"${BuildArtifactsBucket}", "type":"PLAINTEXT"}]'
+            OutputArtifacts:
+            - Name: ImageDefinitionsArtifact
+        - Name: DeployToECSStage
+          Actions:
+          - Name: DeployToECSAction
+            InputArtifacts:
+            - Name: ImageDefinitionsArtifact
+            ActionTypeId:
+              Category: Deploy
+              Owner: AWS
+              Provider: ECS 
+              Version: '1'
+            Configuration:
+              ClusterName: Alium-Fargate-ECS-Cluster 
+              ServiceName: AliumBetsTestTool
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    DependsOn: CodeBuildRole
+    Properties:
+      Name: !Sub ${AWS::StackName}-CodeBuildProject
+      Artifacts:
+        Type: no_artifacts
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+        Type: LINUX_CONTAINER
+      ServiceRole: !Ref CodeBuildRole
+      Source:
+        Type: GITHUB
+        Location: !Ref SourceRepoUrl
+  
+
+  BuildDockerImageProject:
+    Type: AWS::CodeBuild::Project
+    DependsOn: CodeBuildRole
+    Properties:
+      Name: !Sub ${AWS::StackName}-BuildDockerImageProject
+      Artifacts:
+        Type: no_artifacts
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+      ServiceRole: !Ref CodeBuildRole
+      Source:
+        BuildSpec: buildDocker.yml
+        Type: GITHUB
+        Location: !Ref SourceRepoUrl
+
+  AppPipelineWebhook:
+    Type: AWS::CodePipeline::Webhook
+    Properties:
+      Name: !Sub ${AWS::StackName}-AppPipelineWebhook
+      Authentication: GITHUB_HMAC
+      AuthenticationConfiguration: 
+        SecretToken: !Ref GitHubAuthToken
+      Filters:
+        - 
+          JsonPath: "$.ref"
+          MatchEquals: refs/heads/{Branch}
+      TargetPipeline: !Ref Pipeline
+      TargetAction: GitHubSourceAction
+      TargetPipelineVersion: !GetAtt Pipeline.Version
+      RegisterWithThirdParty: true
+
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: codebuild.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+  CFNRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [cloudformation.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: CloudFormationRole
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - 'ec2:*'
+                Effect: Allow
+                Resource: '*'
+
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [codepipeline.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: CodePipelineAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - 's3:*'
+                - 'cloudformation:CreateStack'
+                - 'cloudformation:DescribeStacks'
+                - 'cloudformation:DeleteStack'
+                - 'cloudformation:UpdateStack'
+                - 'cloudformation:CreateChangeSet'
+                - 'cloudformation:ExecuteChangeSet'
+                - 'cloudformation:DeleteChangeSet'
+                - 'cloudformation:DescribeChangeSet'
+                - 'cloudformation:SetStackPolicy'
+                - 'iam:PassRole'
+                - 'sns:Publish'
+                - 'codebuild:*'
+                - 'ecs:*'
+                Effect: Allow
+                Resource: '*'
+
+
+
