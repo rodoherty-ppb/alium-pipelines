@@ -90,13 +90,10 @@ Resources:
             Configuration:
               ActionMode: CREATE_UPDATE
               StackName: rodoherty-alium-ecs-task-def-stack
-              Capabilities: CAPABILITY_IAM
-              RoleArn: !Ref CloudFormationRole
+              Capabilities: CAPABILITY_NAMED_IAM
+              RoleArn: !GetAtt [CloudFormationRole, Arn]
               TemplatePath: 'SourceCode::AliumBetsTestToolTaskDefinition.yml'
-              ParameterOverrides:
-                - ServiceName: 'AliumBetsTestTool'
-                - ContainerName: 'alium-bets-test-tool-container'
-                - ContainerSecurityGroup: sg-0f8319e82c365140a    # Where is this created?  Actually, it should perhaps be created AliumBetsTestToolTaskDefinition.yml which means it shouldn't be a parameter at all.
+              ParameterOverrides: '{"ServiceName": "AliumBetsTestTool", "ContainerName": "alium-bets-test-tool-container", "ContainerSecurityGroup": "sg-0f8319e82c365140a"}'    # Where is this created?  Actually, it should perhaps be created AliumBetsTestToolTaskDefinition.yml which means it shouldn't be a parameter at all.
 
   AppPipelineWebhook:
     Type: AWS::CodePipeline::Webhook

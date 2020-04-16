@@ -1,4 +1,4 @@
-# CloudFormation templates for Alium applications
+# CloudFormation templates for pipelines of Alium applications
 
 This repo contains one directory for each application that is provisioned using code pipeline.
 
