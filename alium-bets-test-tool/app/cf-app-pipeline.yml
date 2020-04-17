@@ -44,13 +44,13 @@ Parameters:
     Type: String
 
 
-Metadata:
-  AWS::CloudFormation::Interface:
-    ParameterGroups:
-      - Label:
-          default: "CodePipeline Settings"
-        Parameters:
-          - PipelineName
+#Metadata:
+#  AWS::CloudFormation::Interface:
+#    ParameterGroups:
+#      - Label:
+#          default: "CodePipeline Settings"
+#        Parameters:
+#          - PipelineName
 
 Resources:
   Pipeline:
@@ -126,19 +126,19 @@ Resources:
               EnvironmentVariables: !Sub '[{"name":"IMAGE_REPO_NAME","value":"alium-ecr-repo","type":"PLAINTEXT"},{"name":"AWS_ACCOUNT_ID","value":"430758838994","type":"PLAINTEXT"}, {"name":"ARTIFACT_BUCKET", "value":"${BuildArtifactsBucket}", "type":"PLAINTEXT"}]'
             OutputArtifacts:
             - Name: ImageDefinitionsArtifact
-        - Name: DeployToECSStage
-          Actions:
-          - Name: DeployToECSAction
-            InputArtifacts:
-            - Name: ImageDefinitionsArtifact
-            ActionTypeId:
-              Category: Deploy
-              Owner: AWS
-              Provider: ECS 
-              Version: '1'
-            Configuration:
-              ClusterName: Alium-Fargate-ECS-Cluster 
-              ServiceName: AliumBetsTestTool
+#        - Name: DeployToECSStage
+#          Actions:
+#          - Name: DeployToECSAction
+#            InputArtifacts:
+#            - Name: ImageDefinitionsArtifact
+#            ActionTypeId:
+#              Category: Deploy
+#              Owner: AWS
+#              Provider: ECS 
+#              Version: '1'
+#            Configuration:
+#              ClusterName: Alium-Fargate-ECS-Cluster 
+#              ServiceName: AliumBetsTestTool
 
   CodeBuildProject:
     Type: AWS::CodeBuild::Project

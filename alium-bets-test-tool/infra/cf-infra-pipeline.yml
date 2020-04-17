@@ -89,7 +89,7 @@ Resources:
               Version: '1'
             Configuration:
               ActionMode: CREATE_UPDATE
-              StackName: rodoherty-alium-ecs-task-def-stack
+              StackName: alium-bets-test-tool
               Capabilities: CAPABILITY_NAMED_IAM
               RoleArn: !GetAtt [CloudFormationRole, Arn]
               TemplatePath: 'SourceCode::AliumBetsTestToolTaskDefinition.yml'
