@@ -1,0 +1,193 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Alium Bets Test Tool - CD Pipeline
+
+Parameters:
+
+  SourceRepoUrl:
+    Type: String
+    Description: URL of the source code repository
+
+  GitHubAuthToken:
+    Type: String
+    Default: '{{resolve:secretsmanager:alium/CodePipelinePOC/GitHubSecret:SecretString:FlutterGlobalCodePipelinePOCGitHubSecret}}'
+    
+  GitHubOwner:
+    Type: String
+    Default: Flutter-Global
+    AllowedPattern: "[A-Za-z0-9-]+"
+
+  GitHubRepo:
+    Type: String
+    AllowedPattern: "[A-Za-z0-9-]+"
+
+  GitHubBranch:
+    Type: String
+    Default: master
+    AllowedPattern: "[A-Za-z0-9-]+"
+
+  PipelineBucket:
+    Default: rodoherty-codepipeline-artifactstorebucket
+    Description: Name of the S3 bucket that codepipeline will create to store source and build artifacts
+    Type: String
+
+  BuildArtifactsBucket:
+    Default: 'rodoherty-codepipeline-build-artifacts'
+    Description: Name of the S3 bucket in which codepipline will store a zip containing the built artifacts
+    Type: String
+
+#  BuildArtifactsS3Key:
+#    Default: buildArtifacts.zip
+#    Description: Name of the S3 key of the zipped build artifact
+#    Type: String
+
+Resources:
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Location: !Ref PipelineBucket
+        Type: S3
+ 
+      DisableInboundStageTransitions: []
+      Name: !Sub ${AWS::StackName}-Pipeline
+      RoleArn: !GetAtt [PipelineRole, Arn]
+      Stages:
+        - Name: Source
+          Actions:
+          - Name: GitHubSource
+            InputArtifacts: []
+            ActionTypeId:
+              Category: Source
+              Owner: ThirdParty
+              Version: 1
+              Provider: GitHub
+            OutputArtifacts:
+            - Name: SourceCode
+            Configuration:
+              Owner: !Ref GitHubOwner
+              Repo: !Ref GitHubRepo
+              Branch: !Ref GitHubBranch
+              PollForSourceChanges: false
+              OAuthToken: !Ref GitHubAuthToken
+          - Name: ECR 
+            InputArtifacts: []
+            ActionTypeId:
+              Category: Source
+              Owner: AWS 
+              Version: 1
+              Provider: ECR
+            OutputArtifacts:
+            - Name: AliumBetsTestToolImage 
+            Configuration:
+              ImageTag: 'latest' 
+              RepositoryName: 'alium-ecr-repo' 
+        - Name: Deploy
+          Actions:
+          - Name: DeployToECS
+            InputArtifacts:
+            - Name: AliumBetsTestToolImage 
+            ActionTypeId:
+              Category: Deploy
+              Owner: AWS
+              Provider: CodeDeployToECS 
+              Version: '1'
+            Configuration:
+              ApplicationName: !Ref CodeDeployApplication
+              DeploymentGroupName: !Ref CodeDeployDeploymentGroup
+              TaskDefinitionTemplateArtifact: SourceArtifact
+              AppSpecTemplateArtifact: 'taskdef.json'
+              AppSpecTemplatePath: 'appspec.yml'
+
+  CodeDeployApplication:
+    Type: AWS::CodeDeploy::Application
+    Properties: 
+      ApplicationName: 'AliumBetsTestTool2'
+      ComputePlatform: ECS
+  
+  CodeDeployDeploymentGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    DependsOn: CodeDeployApplication
+    Properties: 
+      ApplicationName: !Ref CodeDeployApplication
+      DeploymentConfigName: CodeDeployDefault.AllAtOnce
+      LoadBalancerInfo: 
+        ElbInfoList: 
+          - Name: AliumBetsTestToolLoadBalancer 
+        TargetGroupInfoList: 
+          - Name: AliumBetsTestToolTargetGroup1
+          - Name: AliumBetsTestToolTargetGroup2
+      ServiceRoleArn: !GetAtt [CodeDeployServiceRole, Arn] 
+
+
+  CodeDeployServiceRole:
+    Type: AWS::IAM::Role
+    Properties:  
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [codedeploy.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      ManagedPolicyArns: ['arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole']
+
+  CFNRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [cloudformation.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: CloudFormationRole
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - 'ec2:*'
+                Effect: Allow
+                Resource: '*'
+
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [codepipeline.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: CodePipelineAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - 's3:*'
+                - 'cloudformation:CreateStack'
+                - 'cloudformation:DescribeStacks'
+                - 'cloudformation:DeleteStack'
+                - 'cloudformation:UpdateStack'
+                - 'cloudformation:CreateChangeSet'
+                - 'cloudformation:ExecuteChangeSet'
+                - 'cloudformation:DeleteChangeSet'
+                - 'cloudformation:DescribeChangeSet'
+                - 'cloudformation:SetStackPolicy'
+                - 'iam:PassRole'
+                - 'sns:Publish'
+                - 'codebuild:*'
+                - 'ecs:*'
+                - 'ecr:DescribeImages'
+                Effect: Allow
+                Resource: '*'
+
+
+
